@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14323d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fridge">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Fridge</title>
+<style>
+  :root {
+    --frost: #eaf1f4;
+    --card: #ffffff;
+    --ink: #14323d;
+    --muted: #5d7783;
+    --line: #d3e0e6;
+    --ok: #2a8f78;
+    --soon: #c9821a;
+    --bad: #c8453f;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --frost: #0f1e25;
+      --card: #172a33;
+      --ink: #e6f0f4;
+      --muted: #8ba5b1;
+      --line: #284451;
+      --ok: #4cc2a6;
+      --soon: #eaa844;
+      --bad: #ef7770;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--frost);
+    color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.6rem; margin: 8px 0 2px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+
+  form {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 1fr 5rem;
+    gap: 8px;
+  }
+  form .full { grid-column: 1 / -1; }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 2px; }
+  input[type=text], input[type=number], input[type=date] {
+    width: 100%;
+    font: inherit;
+    color: var(--ink);
+    background: var(--frost);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 44px;
+  }
+  button {
+    font: inherit;
+    cursor: pointer;
+    min-height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+    padding: 0 14px;
+  }
+  button.primary { background: var(--ink); color: var(--frost); border-color: var(--ink); font-weight: 600; }
+  :focus-visible { outline: 3px solid var(--ok); outline-offset: 2px; }
+
+  h2 { font-size: 1.05rem; margin: 22px 0 8px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  li {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 6px solid var(--ok);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+  li.soon { border-left-color: var(--soon); }
+  li.expired { border-left-color: var(--bad); }
+  li input[type=checkbox] { width: 26px; height: 26px; flex: none; accent-color: var(--ok); }
+  .info { flex: 1; min-width: 0; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { font-size: 0.85rem; color: var(--muted); }
+  li.soon .meta { color: var(--soon); }
+  li.expired .meta { color: var(--bad); }
+  .del { min-height: 36px; padding: 0 10px; color: var(--muted); }
+  .out li { border-left-color: var(--line); opacity: 0.7; }
+  .out .name { text-decoration: line-through; }
+  .empty { color: var(--muted); padding: 12px 0; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+  .tools button { min-height: 40px; font-size: 0.9rem; color: var(--muted); }
+  details summary { cursor: pointer; padding: 8px 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fridge</h1>
+  <p class="sub" id="summary"></p>
+
+  <form id="addForm">
+    <div>
+      <label for="name">Item</label>
+      <input type="text" id="name" required autocomplete="off" placeholder="e.g. Greek yoghurt">
+    </div>
+    <div>
+      <label for="qty">Qty</label>
+      <input type="number" id="qty" min="1" value="1" inputmode="numeric">
+    </div>
+    <div class="full">
+      <label for="bb">Best before</label>
+      <input type="date" id="bb" required>
+    </div>
+    <button class="primary full" type="submit">Add to fridge</button>
+  </form>
+
+  <h2>In the fridge</h2>
+  <ul id="inList"></ul>
+
+  <details class="out">
+    <summary id="outSummary">Taken out</summary>
+    <ul id="outList"></ul>
+  </details>
+
+  <div class="tools">
+    <button id="exportBtn" type="button">Export backup</button>
+    <button id="importBtn" type="button">Import backup</button>
+    <input type="file" id="importFile" accept="application/json" hidden>
+  </div>
+</main>
+
+<script>
+(function () {
+  var KEY = "fridge-items-v1";
+  var items = load();
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(items)); }
+    catch (e) { alert("Could not save. Is private browsing on?"); }
+  }
+
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function daysUntil(dateStr) {
+    var a = new Date(todayStr() + "T00:00:00");
+    var b = new Date(dateStr + "T00:00:00");
+    return Math.round((b - a) / 86400000);
+  }
+  function status(dateStr) {
+    var d = daysUntil(dateStr);
+    if (d < 0) return { cls: "expired", text: "Expired " + (-d) + (d === -1 ? " day ago" : " days ago") };
+    if (d === 0) return { cls: "soon", text: "Expires today" };
+    if (d <= 3) return { cls: "soon", text: "Expires in " + d + (d === 1 ? " day" : " days") };
+    return { cls: "", text: "Best before " + dateStr };
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  var inList = document.getElementById("inList");
+  var outList = document.getElementById("outList");
+
+  function row(item, isOut) {
+    var li = document.createElement("li");
+    var s = status(item.bestBefore);
+    if (!isOut && s.cls) li.className = s.cls;
+
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = isOut;
+    cb.setAttribute("aria-label", (isOut ? "Put back: " : "Take out: ") + item.name);
+    cb.addEventListener("change", function () {
+      item.takenOut = isOut ? null : todayStr();
+      save(); render();
+    });
+
+    var info = document.createElement("div");
+    info.className = "info";
+    var n = document.createElement("div");
+    n.className = "name";
+    n.textContent = item.name + (item.qty > 1 ? " × " + item.qty : "");
+    var m = document.createElement("div");
+    m.className = "meta";
+    m.textContent = isOut ? "Taken out " + item.takenOut : s.text;
+    info.appendChild(n); info.appendChild(m);
+
+    var del = document.createElement("button");
+    del.className = "del";
+    del.type = "button";
+    del.textContent = "Delete";
+    del.setAttribute("aria-label", "Delete " + item.name);
+    del.addEventListener("click", function () {
+      if (confirm("Delete " + item.name + "?")) {
+        items = items.filter(function (x) { return x.id !== item.id; });
+        save(); render();
+      }
+    });
+
+    li.appendChild(cb); li.appendChild(info); li.appendChild(del);
+    return li;
+  }
+
+  function render() {
+    var inside = items.filter(function (i) { return !i.takenOut; })
+      .sort(function (a, b) { return a.bestBefore.localeCompare(b.bestBefore); });
+    var outside = items.filter(function (i) { return i.takenOut; })
+      .sort(function (a, b) { return b.takenOut.localeCompare(a.takenOut); });
+
+    inList.innerHTML = ""; outList.innerHTML = "";
+    if (!inside.length) {
+      var e = document.createElement("li");
+      e.className = "empty"; e.style.border = "none"; e.style.background = "none";
+      e.textContent = "Nothing here yet. Add your first item above.";
+      inList.appendChild(e);
+    }
+    inside.forEach(function (i) { inList.appendChild(row(i, false)); });
+    outside.forEach(function (i) { outList.appendChild(row(i, true)); });
+
+    var urgent = inside.filter(function (i) { return daysUntil(i.bestBefore) <= 3; }).length;
+    document.getElementById("summary").textContent =
+      inside.length + (inside.length === 1 ? " item" : " items") +
+      (urgent ? ", " + urgent + " need attention" : "");
+    document.getElementById("outSummary").textContent = "Taken out (" + outside.length + ")";
+  }
+
+  document.getElementById("bb").value = todayStr();
+
+  document.getElementById("addForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var name = document.getElementById("name").value.trim();
+    var bb = document.getElementById("bb").value;
+    var qty = parseInt(document.getElementById("qty").value, 10) || 1;
+    if (!name || !bb) return;
+    items.push({ id: uid(), name: name, qty: qty, added: todayStr(), bestBefore: bb, takenOut: null });
+    save(); render();
+    document.getElementById("name").value = "";
+    document.getElementById("qty").value = 1;
+    document.getElementById("name").focus();
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "fridge-backup-" + todayStr() + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  document.getElementById("importBtn").addEventListener("click", function () {
+    document.getElementById("importFile").click();
+  });
+  document.getElementById("importFile").addEventListener("change", function (ev) {
+    var f = ev.target.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var data = JSON.parse(r.result);
+        if (!Array.isArray(data)) throw new Error("bad");
+        if (confirm("Replace current list with " + data.length + " imported items?")) {
+          items = data; save(); render();
+        }
+      } catch (e) { alert("That file is not a valid fridge backup."); }
+    };
+    r.readAsText(f);
+    ev.target.value = "";
+  });
+
+  render();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
